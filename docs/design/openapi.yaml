@@ -1,0 +1,872 @@
+openapi: 3.0.3
+info:
+  title: Appointment Booking System API
+  version: 1.0.0
+  description: |
+    REST API for the clinic appointment booking system (T13).
+
+    **Conventions**
+    - Base path: `/api`. All bodies are JSON.
+    - Authentication: JWT sent as `Authorization: Bearer <token>` (NFR-3, NFR-4).
+    - Roles: `customer` and `admin`. Each endpoint says who can call it.
+    - All dates are ISO 8601 in UTC, for example `2026-12-01T09:30:00Z` (NFR-8).
+    - Errors always use the `Error` schema.
+    - Booking a slot that is already taken returns `409` (FR-10, NFR-7).
+servers:
+  - url: http://localhost:3000/api
+    description: Local development
+tags:
+  - name: Auth
+  - name: Catalog
+  - name: Availability
+  - name: Bookings
+  - name: Admin
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create a customer account (FR-1, US-1)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in (FR-2, US-2, US-8)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Wrong email or password (the message does not say which one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out (FR-2)
+      description: The client discards the token. The server may also clear a cookie if one is used.
+      responses:
+        '204':
+          description: Logged out
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the current user
+      responses:
+        '200':
+          description: The current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /services:
+    get:
+      tags: [Catalog]
+      summary: List active services (FR-4, US-3)
+      security: []
+      responses:
+        '200':
+          description: Active services with duration and price
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Service'
+    post:
+      tags: [Admin]
+      summary: Add a service (FR-5, US-9). Admin only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceInput'
+      responses:
+        '201':
+          description: Service created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /services/{serviceId}:
+    parameters:
+      - $ref: '#/components/parameters/ServiceId'
+    patch:
+      tags: [Admin]
+      summary: Edit a service (FR-5, US-9). Admin only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceInput'
+      responses:
+        '200':
+          description: Service updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Admin]
+      summary: Deactivate a service (FR-5, US-9). Admin only
+      description: |
+        The service is not removed from the database. It is marked `isActive = false`.
+        A service with future bookings cannot be deleted.
+      responses:
+        '204':
+          description: Service deactivated
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The service has future bookings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /providers:
+    get:
+      tags: [Catalog]
+      summary: List active providers
+      security: []
+      responses:
+        '200':
+          description: Active providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Provider'
+
+  /availability:
+    get:
+      tags: [Availability]
+      summary: Get available slots for a service on a date (FR-8, US-4)
+      description: |
+        Returns only slots that are inside working hours, not blocked by time off,
+        not already booked and not in the past.
+      security: []
+      parameters:
+        - name: serviceId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: providerId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          description: Day in the clinic time zone
+          schema:
+            type: string
+            format: date
+            example: '2026-12-01'
+      responses:
+        '200':
+          description: Available slots, sorted by start time
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  slots:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Slot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /bookings:
+    post:
+      tags: [Bookings]
+      summary: Book a slot (FR-9, FR-10, US-5)
+      description: |
+        Creates the booking and its slot records in one database transaction.
+        If any slot is already taken, nothing is created and `409` is returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingCreate'
+      responses:
+        '201':
+          description: Booking confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/SlotTaken'
+
+  /bookings/mine:
+    get:
+      tags: [Bookings]
+      summary: List my bookings (FR-13, US-7)
+      parameters:
+        - name: when
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [upcoming, past]
+      responses:
+        '200':
+          description: The current user's bookings only (NFR-5)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /bookings/{bookingId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    post:
+      tags: [Bookings]
+      summary: Cancel a booking (FR-11, FR-15, US-6, US-12)
+      description: |
+        A customer can cancel only their own bookings. An admin can cancel any booking.
+        The booking status becomes `cancelled` and its slots are released.
+      responses:
+        '200':
+          description: Booking cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The booking is already cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /bookings/{bookingId}/reschedule:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    post:
+      tags: [Bookings]
+      summary: Move a booking to another slot (FR-12, US-13). Should
+      description: The old slots are released and the new ones reserved in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescheduleRequest'
+      responses:
+        '200':
+          description: Booking moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/SlotTaken'
+
+  /admin/schedule:
+    get:
+      tags: [Admin]
+      summary: Schedule of one day, in time order (FR-14, US-11). Admin only
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Defaults to today in the clinic time zone
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Confirmed bookings of the day sorted by start time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/bookings:
+    get:
+      tags: [Admin]
+      summary: List, filter and search all bookings (FR-14, FR-16, US-11, US-15). Admin only
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [confirmed, cancelled]
+        - name: search
+          in: query
+          description: Part of the patient name
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: A page of bookings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Booking'
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  total:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Admin]
+      summary: Create a booking for a patient who called by phone (FR-15, US-12). Admin only
+      description: Uses the same double-booking protection as online bookings (FR-10).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualBookingCreate'
+      responses:
+        '201':
+          description: Booking confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/SlotTaken'
+
+  /providers/{providerId}/working-hours:
+    parameters:
+      - $ref: '#/components/parameters/ProviderId'
+    get:
+      tags: [Admin]
+      summary: Get weekly working hours (FR-6, US-10). Admin only
+      responses:
+        '200':
+          description: Working hours of the provider
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkingHours'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Admin]
+      summary: Replace the weekly working hours (FR-6, US-10). Admin only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/WorkingHours'
+      responses:
+        '200':
+          description: Working hours saved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkingHours'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /providers/{providerId}/time-off:
+    parameters:
+      - $ref: '#/components/parameters/ProviderId'
+    get:
+      tags: [Admin]
+      summary: List days off and blocked times (FR-7, US-14). Admin only
+      responses:
+        '200':
+          description: Time off entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimeOff'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Admin]
+      summary: Block a day or a time range (FR-7, US-14). Admin only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeOffInput'
+      responses:
+        '201':
+          description: Time off created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeOff'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /time-off/{timeOffId}:
+    delete:
+      tags: [Admin]
+      summary: Remove a time off entry (FR-7). Admin only
+      parameters:
+        - name: timeOffId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ServiceId:
+      name: serviceId
+      in: path
+      required: true
+      schema:
+        type: string
+    ProviderId:
+      name: providerId
+      in: path
+      required: true
+      schema:
+        type: string
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Invalid input (server-side validation, NFR-6)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The user does not have permission (NFR-4, NFR-5)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SlotTaken:
+      description: One of the requested slots is already booked. Nothing was created.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: The selected time slot is no longer available
+        details:
+          type: array
+          items:
+            type: string
+
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          example: Mohammad
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [customer, admin]
+
+    Service:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        durationMinutes:
+          type: integer
+          example: 30
+        price:
+          type: number
+          example: 20
+        isActive:
+          type: boolean
+
+    ServiceInput:
+      type: object
+      required: [name, durationMinutes, price]
+      properties:
+        name:
+          type: string
+        durationMinutes:
+          type: integer
+          minimum: 1
+          description: Must be a multiple of the slot length (30 minutes by default)
+        price:
+          type: number
+          minimum: 0
+
+    Provider:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        isActive:
+          type: boolean
+
+    WorkingHours:
+      type: object
+      required: [weekday, startTime, endTime]
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: 0 = Sunday to 6 = Saturday
+        startTime:
+          type: string
+          example: '09:00'
+        endTime:
+          type: string
+          example: '17:00'
+
+    TimeOff:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+
+    TimeOffInput:
+      type: object
+      required: [startAt, endAt]
+      properties:
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+
+    Slot:
+      type: object
+      properties:
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+          description: Present for online bookings
+        customerName:
+          type: string
+          description: Present for manual bookings
+        customerPhone:
+          type: string
+        providerId:
+          type: string
+        providerName:
+          type: string
+          readOnly: true
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+          readOnly: true
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [confirmed, cancelled]
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    BookingCreate:
+      type: object
+      required: [serviceId, providerId, startAt]
+      properties:
+        serviceId:
+          type: string
+        providerId:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+          description: Start of the first slot. The end is calculated from the service duration.
+
+    ManualBookingCreate:
+      type: object
+      required: [serviceId, providerId, startAt, customerName]
+      properties:
+        serviceId:
+          type: string
+        providerId:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+        customerName:
+          type: string
+        customerPhone:
+          type: string
+
+    RescheduleRequest:
+      type: object
+      required: [startAt]
+      properties:
+        startAt:
+          type: string
+          format: date-time
