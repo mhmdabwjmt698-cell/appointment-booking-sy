@@ -38,3 +38,64 @@
 | NFR-11 | Compatibility | Works on the latest versions of Chrome, Firefox, Safari and Edge. |
 | NFR-12 | Maintainability | Code is versioned on GitHub and the main flows are covered by automated tests. |
 | NFR-13 | Deployability | The app is published on a public URL with setup instructions in the README. |
+
+---
+
+## Priorities (MoSCoW)
+
+### Functional requirements
+
+| ID | Priority | Note |
+|----|----------|------|
+| FR-1 | Must | Registration |
+| FR-2 | Must | Login and logout |
+| FR-3 | Must | Customer and Admin roles |
+| FR-4 | Must | Service list |
+| FR-5 | Must | Manage services |
+| FR-6 | Must | Working hours |
+| FR-7 | Should | Days off and blocked times |
+| FR-8 | Must | Available slots |
+| FR-9 | Must | Book a slot |
+| FR-10 | Must | No double booking, the core of the system |
+| FR-11 | Must | Cancel a booking |
+| FR-12 | Should | Reschedule |
+| FR-13 | Must | My bookings |
+| FR-14 | Must | Admin schedule |
+| FR-15 | Must | Manual booking by admin |
+| FR-16 | Should | Filter and search |
+
+### Non-functional requirements
+
+| ID | Priority | Note |
+|----|----------|------|
+| NFR-1 | Should | Slots load in under 2 seconds |
+| NFR-2 | Should | Booking completes in under 1 second |
+| NFR-3 | Must | Hashed passwords |
+| NFR-4 | Must | Admin-only access |
+| NFR-5 | Must | Customers see only their own bookings |
+| NFR-6 | Must | Server-side validation |
+| NFR-7 | Must | Automated test for double booking |
+| NFR-8 | Must | UTC storage |
+| NFR-9 | Should | Booking in under 2 minutes |
+| NFR-10 | Must | Responsive on mobile |
+| NFR-11 | Should | Latest browsers |
+| NFR-12 | Should | Automated tests for main flows |
+| NFR-13 | Must | Public URL and README |
+
+### Could and Won't (not part of v1)
+
+| Priority | Item |
+|----------|------|
+| Could | Email or SMS reminders |
+| Could | Guest booking without an account |
+| Could | Calendar view |
+| Won't | Online payments |
+| Won't | Native mobile app |
+| Won't | Multiple clinics (multi-tenant) |
+| Won't | Multiple languages |
+| Won't | Google Calendar integration |
+
+### Summary
+- Functional: 13 Must, 3 Should
+- Non-functional: 8 Must, 5 Should
+- If development runs late, Should items are cut first (see risk R4 in `docs/risks.md`).
