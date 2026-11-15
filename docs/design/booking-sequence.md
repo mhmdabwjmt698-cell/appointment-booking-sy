@@ -90,3 +90,4 @@ Send 10 booking requests for the same provider and slot at the same time. The te
 | FR-10 No double booking | Unique index and transaction, Part 2 |
 | NFR-7 Automated test | Test described above |
 | NFR-8 UTC | `startAt` and `endAt` are sent and stored in UTC |
+
